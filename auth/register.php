@@ -1,24 +1,52 @@
 <?php
-// Set up the database connection
-$db = new PDO('mysql:host=localhost;dbname=my_api', 'root', '');
+// Check if the connection was successful
+try {
+    $db = new PDO('mysql:host=localhost;dbname=my_api', 'root', '', [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+]);
+    // Connection was successful
+} catch (PDOException $e) {
+    // Connection failed
+    echo json_encode(['message' => 'Connection to the database failed because: ' . $e->getMessage()]);
+    exit;
+}
 
 // Set up CORS (Cross-Origin Resource Sharing) headers
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+// Allow requests from any origin
+header("Access-Control-Allow-Origin: *");
+
+// Allow POST method
+header("Access-Control-Allow-Methods: POST");
+
+// Allow Content-Type and Authorization headers
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+
+// Allow credentials
+header("Access-Control-Allow-Credentials: true");
+
+// Return 200 OK if preflight request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    // Return response code
+    http_response_code(200);
+    exit;
+}
 
 // Check the request method
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-  http_response_code(405);
-  echo json_encode(array('error' => 'Method not allowed'));
-  exit;
+    // Return error message
+    http_response_code(405);
+    echo json_encode(array(
+    'message' => 'Method not allowed'));
+    exit;
 }
 
 // Check for a valid Content-Type header
-if (!isset($_SERVER['CONTENT_TYPE']) || $_SERVER['CONTENT_TYPE'] !== 'application/json') {
-  http_response_code(400);
-  echo json_encode(array('error' => 'Content-Type must be application/json'));
-  exit;
+if (empty($_SERVER['CONTENT_TYPE']) || $_SERVER['CONTENT_TYPE'] !== 'application/json') {
+    // Return error message
+    http_response_code(400);
+    echo json_encode(array(
+    'message' => 'Content-Type must be application/json'));
+    exit;
 }
 
 // Read the request body
@@ -28,22 +56,58 @@ $body = file_get_contents('php://input');
 $data = json_decode($body, true);
 
 // Validate the request data
-if (!isset($data['email']) || !isset($data['username']) || !isset($data['password']) || !isset($data['full_name']) || !isset($data['phone_number']) || !isset($data['full_address'])) {
-  http_response_code(400);
-  echo json_encode(array('error' => 'Fill all form'));
-  exit;
+if (empty($data['email']) || empty($data['username']) || empty($data['password']) || empty($data['full_name']) || empty($data['phone_number']) || empty($data['full_address'])) {
+    // Return error message
+    http_response_code(400);
+    echo json_encode(array(
+    'message' => 'Fill all form'));
+    exit;
 }
 
-//search existed email or username
-$userQuery = $db->prepare('SELECT * FROM users WHERE email = :email OR username = :username');
-$userQuery->bindParam(':email', $data['email']);
-$userQuery->bindParam(':username', $data['username']);
-$userQuery->execute();
-$user = $userQuery->fetch();
+// Validate email
+if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+    // Return error message
+    http_response_code(400);
+    echo json_encode(['message' => 'Invalid email']);
+    exit;
+}
 
-if (!$user || $data['email'] != $user['email'] || $data['username'] != $user['username']) {
+// Validate password
+if (strlen($data['password']) < 6) {
+    // Return error message
+    http_response_code(400);
+    echo json_encode(['message' => 'Password must be at least 6 characters']);
+    exit;
+}
+
+// Check if query is success
+try {
+   //search existed email or username
+    $userQuery = $db->prepare('SELECT COUNT(*) as count FROM users WHERE email = :email OR username = :username');
+    $userQuery->bindParam(':email', $data['email']);
+    $userQuery->bindParam(':username', $data['username']);
+    $userQuery->execute();
+    $user = $userQuery->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    // Return error message
+    echo json_encode(['message' => 'Count user failed because : ' . $e->getMessage()]);
+    exit;
+}
+
+//check if user is exist
+if ($user['count'] > 0) {
+    // Return error message
+    http_response_code(400);
+    echo json_encode(array(
+    'message' => 'Username or email already exist'));
+    exit;
+}
+
+// Check if query is success
+try {
     //insert inputed user data to db
     $query = $db->prepare('INSERT INTO users (email, username, password, full_name, phone_number, full_address)  VALUES (:email, :username, :password, :full_name, :phone_number, :full_address)');
+    //binding parameters with json body
     $query->bindParam(':email', $data['email']);
     $query->bindParam(':username', $data['username']);
     $query->bindParam(':password', $data['password']);
@@ -51,17 +115,14 @@ if (!$user || $data['email'] != $user['email'] || $data['username'] != $user['us
     $query->bindParam(':phone_number', $data['phone_number']);
     $query->bindParam(':full_address', $data['full_address']);
     $query->execute();
-
-    echo json_encode(array(
-        'status' => 'success',
-        'message' => 'Successfully Register'
-    ));
-} else {
-    // Check the email and password against the database
-    http_response_code(401);
-  echo json_encode($user);
-  echo json_encode(array('error' => 'Username or email already exist'));
-  exit;
+} catch (PDOException $e) {
+    // Return error message
+    echo json_encode(['message' => 'Register failed because : ' . $e->getMessage()]);
+    exit;
 }
 
-// Return the JWT to the client
+//return the success message
+http_response_code(201);
+echo json_encode(array(
+    'message' => 'Successfully Register'
+));
